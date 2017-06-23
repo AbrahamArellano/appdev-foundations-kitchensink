@@ -7,6 +7,12 @@
       <url>http://nexus3-aarellano-env.apps.emeabootcamp.openshift.opentlc.com/repository/maven-openshift/</url>
       <mirrorOf>*</mirrorOf>
     </mirror>
+    <mirror>
+      <id>Maven</id>
+      <name>Maven Public Mirror</name>
+      <url>http://nexus3-aarellano-env.apps.emeabootcamp.openshift.opentlc.com/repository/maven-full/</url>
+      <mirrorOf>*</mirrorOf>
+    </mirror>	  
   </mirrors>
   <servers>
     <server>
