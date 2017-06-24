@@ -135,7 +135,215 @@ node('maven') {
     }
     
    stage ('Nexus integration') {
-    sh "mvn -s nexus_settings.xml deploy -DskipTests=true"
+    sh "mvn -s nexus_settings.xml deploy -DskipTests=true -DaltDeploymentRepository=snapshots::default::http://nexus3-aarellano-env.apps.emeabootcamp.openshift.opentlc.com/repository/snapshots"
    }
+   
+    
+   stage ('DEV Deploy') {
+     sh "rm -rf oc-build && mkdir -p oc-build/deployments"
+     sh "cp target/openshift-tasks.war oc-build/deployments/ROOT.war"
+     sh "oc project aarellano-dev"
+     // clean up. keep the image stream
+     sh "oc delete bc,dc,svc,route -l app=tasks -n aarellano-dev"
+     // create build. override the exit code since it complains about exising imagestream
+     sh "oc new-build --name=tasks --image-stream=jboss-eap70-openshift --binary=true --labels=app=tasks -n aarellano-dev || true"
+     // build image
+     sh "oc start-build tasks --from-dir=oc-build --wait=true -n aarellano-dev"
+     // deploy image
+     sh "oc new-app tasks:latest -n aarellano-dev"
+     sh "oc expose svc/tasks -n aarellano-dev"
+   }   
 }
 
+
+-----------------
+------ v2 ------
+-----------------
+
+// using openshift plugin commands
+node('maven') {
+    
+   stage ('Build Phase') {
+     git branch: 'dev-branch', url: 'https://github.com/AbrahamArellano/appdev-foundations-kitchensink.git'
+     sh "mvn clean install -DskipTests=true"
+   }
+   
+   def groupId    = getGroupIdFromPom("pom.xml")
+   def artifactId = getArtifactIdFromPom("pom.xml")
+   def version    = getVersionFromPom("pom.xml")
+   
+   stage ('Nexus integration') {
+    sh "mvn -s nexus_settings.xml deploy -DskipTests=true -DaltDeploymentRepository=snapshots::default::http://nexus3-aarellano-env.apps.emeabootcamp.openshift.opentlc.com/repository/snapshots"
+   }   
+   
+   stage('Build OpenShift Image') {
+     def newTag = "TestingCandidate-${version}"
+     echo "New Tag: ${newTag}"
+
+     // Copy the war file we just built and rename to ROOT.war
+     sh "cp ./target/openshift-tasks.war ./ROOT.war"
+
+     // Start Binary Build in OpenShift using the file we just published
+     // Replace xyz-tasks-dev with the name of your dev project
+     sh "oc project xyz-tasks-dev"
+     sh "oc start-build tasks --from-file=./ROOT.war -n xyz-tasks-dev"
+
+     openshiftVerifyBuild bldCfg: 'tasks', checkForTriggeredDeployments: 'false', namespace: 'xyz-tasks-dev', verbose: 'false', waitTime: ''
+     openshiftTag alias: 'false', destStream: 'tasks', destTag: newTag, destinationNamespace: 'xyz-tasks-dev', namespace: 'xyz-tasks-dev', srcStream: 'tasks', srcTag: 'latest', verbose: 'false'
+   }   
+   
+   stage ('Deploy DEV') {
+     String warFileName = "${groupId}.${artifactId}"
+     warFileName = warFileName.replace('.', '/')
+     sh "echo ${warFileName}/${version}/${artifactId}-${version}.war"
+     
+     sh "oc project aarellano-dev"
+     sh "oc delete bc,dc,svc,route -l app=kitchensink -n aarellano-dev"
+     
+     sh "oc new-build --name=kitchensink --image-stream=jboss-eap70-openshift --binary=true --labels=app=kitchensink -n aarellano-dev || true"
+     sh "oc start-build kitchensink --from-dir=oc-build --wait=true -n aarellano-dev"
+     
+     sh "oc new-app kitchensink:latest -n aarellano-dev"
+     sh "oc expose svc/kitchensink -n aarellano-dev"
+
+   }   
+   
+}
+
+// Convenience Functions to read variables from the pom.xml
+def getVersionFromPom(pom) {
+  def matcher = readFile(pom) =~ '<version>(.+)</version>'
+  matcher ? matcher[0][1] : null
+}
+def getGroupIdFromPom(pom) {
+  def matcher = readFile(pom) =~ '<groupId>(.+)</groupId>'
+  matcher ? matcher[0][1] : null
+}
+def getArtifactIdFromPom(pom) {
+  def matcher = readFile(pom) =~ '<artifactId>(.+)</artifactId>'
+  matcher ? matcher[0][1] : null
+}
+
+
+
+---- v3 -----
+--------------
+
+
+// using openshift plugin commands
+node('maven') {
+    
+   stage ('Build Phase') {
+     git branch: 'dev-branch', url: 'https://github.com/AbrahamArellano/appdev-foundations-kitchensink.git'
+     sh "mvn clean install -DskipTests=true"
+   }
+   
+   def groupId    = getGroupIdFromPom("pom.xml")
+   def artifactId = getArtifactIdFromPom("pom.xml")
+   def version    = getVersionFromPom("pom.xml")
+   
+   stage ('Nexus integration') {
+    sh "mvn -s nexus_settings.xml deploy -DskipTests=true -DaltDeploymentRepository=snapshots::default::http://nexus3-aarellano-env.apps.emeabootcamp.openshift.opentlc.com/repository/snapshots"
+   }   
+   
+   stage('Build OpenShift Image') {
+     def newTag = "TestingCandidate-${version}"
+     echo "New Tag: ${newTag}"
+
+     // Copy the war file we just built and rename to kitchensink.war
+     sh "cp ./target/jboss-kitchensink-angularjs.war ./kitchensink.war"
+
+     // Start Binary Build in OpenShift using the file we just published
+     sh "oc project aarellano-dev"
+     sh "oc delete bc,dc,svc,route,is -l app=kitchensink -n aarellano-dev"
+	 sh "oc new-build --binary=true --name=kitchensink --image-stream=jboss-eap70-openshift --labels=app=kitchensink -n aarellano-dev || true"
+	 sh "oc start-build kitchensink --from-file=./kitchensink.war --wait=true -n aarellano-dev"	 
+	 sh "oc new-app kitchensink:newTag -n aarellano-dev"
+	 sh "oc set triggers dc/kitchensink --remove-all"
+	 //sh "oc expose dc kitchensink --port 8080"
+	 sh "oc expose svc kitchensink"
+     openshiftVerifyBuild bldCfg: 'kitchensink', checkForTriggeredDeployments: 'false', namespace: 'aarellano-dev', verbose: 'false', waitTime: ''
+     openshiftTag alias: 'false', destStream: 'kitchensink', destTag: newTag, destinationNamespace: 'aarellano-dev', namespace: 'aarellano-dev', srcStream: 'kitchensink', srcTag: 'latest', verbose: 'false'
+   }   
+   
+   stage('Deploy to Dev') {
+     // Patch the DeploymentConfig so that it points to the latest TestingCandidate-${version} Image.
+     sh "oc project aarellano-dev"	 
+     sh "oc patch dc kitchensink --patch '{\"spec\": { \"triggers\": [ { \"type\": \"ImageChange\", \"imageChangeParams\": { \"containerNames\": [ \"kitchensink\" ], \"from\": { \"kind\": \"ImageStreamTag\", \"namespace\": \"aarellano-dev\", \"name\": \"kitchensink:TestingCandidate-$version\"}}}]}}' -n aarellano-dev"
+     openshiftDeploy depCfg: 'kitchensink', namespace: 'aarellano-dev', verbose: 'false', waitTime: '', waitUnit: 'sec'
+     openshiftVerifyDeployment depCfg: 'kitchensink', namespace: 'aarellano-dev', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'false', waitTime: '', waitUnit: 'sec'
+     openshiftVerifyService namespace: 'aarellano-dev', svcName: 'kitchensink', verbose: 'false'
+   }   
+   
+}
+
+// Convenience Functions to read variables from the pom.xml
+def getVersionFromPom(pom) {
+  def matcher = readFile(pom) =~ '<version>(.+)</version>'
+  matcher ? matcher[0][1] : null
+}
+def getGroupIdFromPom(pom) {
+  def matcher = readFile(pom) =~ '<groupId>(.+)</groupId>'
+  matcher ? matcher[0][1] : null
+}
+def getArtifactIdFromPom(pom) {
+  def matcher = readFile(pom) =~ '<artifactId>(.+)</artifactId>'
+  matcher ? matcher[0][1] : null
+}
+
+
+---- v4 -----
+--------------
+
+// using openshift plugin commands
+node('maven') {
+    
+   stage ('Build Phase') {
+     git branch: 'dev-branch', url: 'https://github.com/AbrahamArellano/appdev-foundations-kitchensink.git'
+     sh "mvn clean install -DskipTests=true"
+   }
+   
+   def groupId    = getGroupIdFromPom("pom.xml")
+   def artifactId = getArtifactIdFromPom("pom.xml")
+   def version    = getVersionFromPom("pom.xml")
+   
+   stage('Deploy to Dev') {
+     def newTag = "TestingCandidate-${version}"
+     echo "New Tag: ${newTag}"
+
+     // Copy the war file we just built and rename to kitchensink.war
+     sh "cp ./target/jboss-kitchensink-angularjs.war ./kitchensink.war"
+
+     // Start Binary Build in OpenShift using the file we just published
+     sh "oc project aarellano-dev"
+     sh "oc delete bc,dc,svc,route,is -l app=kitchensink -n aarellano-dev"
+	 sh "oc new-build --binary=true --name=kitchensink --image-stream=jboss-eap70-openshift --labels=app=kitchensink -n aarellano-dev || true"
+	 sh "oc start-build kitchensink --from-file=./kitchensink.war --wait=true -n aarellano-dev"	 
+	 sh "oc new-app kitchensink:latest -n aarellano-dev"
+	 sh "oc set triggers dc/kitchensink --remove-all"
+	 //sh "oc expose dc kitchensink --port 8080"
+	 //sh "oc expose svc kitchensink"
+     openshiftVerifyBuild bldCfg: 'kitchensink', checkForTriggeredDeployments: 'false', namespace: 'aarellano-dev', verbose: 'false', waitTime: ''
+     openshiftTag alias: 'false', destStream: 'kitchensink', destTag: newTag, destinationNamespace: 'aarellano-dev', namespace: 'aarellano-dev', srcStream: 'kitchensink', srcTag: 'latest', verbose: 'false'
+   }   
+   
+   stage('Deploy to Stage') {
+     
+   }   
+   
+   
+}
+
+// Convenience Functions to read variables from the pom.xml
+def getVersionFromPom(pom) {
+  def matcher = readFile(pom) =~ '<version>(.+)</version>'
+  matcher ? matcher[0][1] : null
+}
+def getGroupIdFromPom(pom) {
+  def matcher = readFile(pom) =~ '<groupId>(.+)</groupId>'
+  matcher ? matcher[0][1] : null
+}
+def getArtifactIdFromPom(pom) {
+  def matcher = readFile(pom) =~ '<artifactId>(.+)</artifactId>'
+  matcher ? matcher[0][1] : null
+}
