@@ -30,10 +30,8 @@ objects:
         kind: ImageStreamTag
         name: ${APPLICATION_NAME}:latest
     source:
-      git:
-        ref: ${GIT_REF}
-        uri: ${GIT_URI}
-      type: Git
+      type: Binary
+      binary: {}
     strategy:
       sourceStrategy:
         env:
