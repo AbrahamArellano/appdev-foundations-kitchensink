@@ -161,7 +161,7 @@ objects:
   kind: Service
   metadata:
     labels:
-      app: ${APPLICATION_NAME}
+      application: ${APPLICATION_NAME}
     annotations:
       description: The kitchensink application http port.
       service.alpha.openshift.io/dependencies: '[{"name":"${APPLICATION_NAME}-postgresql","namespace":"","kind":"Service"}]'
